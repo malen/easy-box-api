@@ -1,7 +1,7 @@
 #!/usr/bin/php -q
 <?php
 
-namespace Malen\BoxApi;
+//namespace Malen\BoxApi;
 
 require(dirname(dirname(__FILE__)) . '/vendor/autoload.php');
 
@@ -108,32 +108,36 @@ class EasyBoxApi
         // アップロードファイルの存在チェック
         if (is_file($upload_file)) {
 
-            //print(realpath($upload_file));
+            //print(realpath($upload_file) . PHP_EOL);
             // 拡張子のチェック
-            // if (pathinfo($upload_file, PATHINFO_EXTENSION) != "zip") {
-            //     print("xxxxxxxxxxxx");
-            //     return;
-            // }
+            if (pathinfo($upload_file, PATHINFO_EXTENSION) != "zip") {
+                print("Zipファイルのフルパスを指定してください。" . PHP_EOL);
+                //return;
+            }
             // アップロードファイルのサイズチェック
-            print(basename($upload_file));
-            print(dirname(__FILE__));
-            print(dirname($upload_file));
-            print(pathinfo($upload_file, PATHINFO_EXTENSION));
+            // print(basename($upload_file) . PHP_EOL);
+            // print(dirname(__FILE__) . PHP_EOL);
+            // print(dirname($upload_file) . PHP_EOL);
+            // print("ファイルサイズ：" . filesize($upload_file));
 
-            print("ファイルサイズ：" . filesize($upload_file));
+            // ファイルサイズを取得する
+            $file_size = filesize($upload_file);
             // ファイルサイズチェック
-            if (filesize($upload_file) > self::FILE_CHUNKED_SIZE) {
-                print("50MB 超えた");
-                $this->uploadLargeFile($folder_id, filesize($upload_file), $upload_file);
+            if ($file_size > self::FILE_CHUNKED_SIZE) {
+                print(sprintf("[%s] のファイルサイズが%sMBです。50MB を超えた。uploadLargeFileメソッドを使ってアップロード中...", realpath($upload_file), number_format($file_size / 1024 / 1024)) . PHP_EOL);
+                $this->uploadLargeFile($folder_id, $file_size, $upload_file);
             } else {
-                print("50MB 未満");
+                print(sprintf("[%s] のファイルサイズが%dです。50MB が未満です。uploadSmallFileメソッドを使ってアップロード中...", realpath($upload_file), $file_size) . PHP_EOL);
                 $this->uploadSmallFile($folder_id, $upload_file);
             }
         } else {
-            print("not exists!");
+            print("アップロードファイルが見つかりません。");
         }
     }
 
+    /**
+     * ファイルサイズが５０MB未満の場合、このAPIを使う
+     */
     protected function uploadSmallFile($folder_id, $upload_file)
     {
         $curl = curl_init($this->upload_url);
@@ -159,7 +163,7 @@ class EasyBoxApi
         if (CURLE_OK !== $errno) {
             throw new RuntimeException($error, $errno);
         }
-        print($body);
+        //print($body);
     }
 
     /**
@@ -168,11 +172,17 @@ class EasyBoxApi
     protected function uploadLargeFile($folder_id, $file_size, $upload_file)
     {
         $session = $this->getUploadSession($folder_id, $file_size, basename($upload_file));
-        print($session->part_size);
-        print($session->id);
-        $this->uploadPartsBySession($session->id, $upload_file, $session->total_parts);
-
-        $this->getPartsList($session->id, basename($upload_file));
+        if (is_null($session)) {
+            return;
+        }
+        // print($session->part_size);
+        // print($session->id);
+        $commit_body = $this->uploadPartsBySession($session, $upload_file);
+        $uploaded_file = $this->commitSession($session, $upload_file, $commit_body);
+        if ($uploaded_file == basename($upload_file)) {
+            print(sprintf("ファイル[%s]がアップロードされました。", realpath($upload_file)));
+        }
+        //$this->getPartsList($session->id, basename($upload_file));
     }
 
     protected function getUploadSession($folder_id, $file_size, $file_name)
@@ -207,12 +217,19 @@ class EasyBoxApi
 
         if (CURLE_OK !== $errno) {
             throw new RuntimeException($error, $errno);
+        } else {
+            //print_r(json_decode($body));
+            $result = json_decode($body);
+            if ($result->type == "error") {
+                print($result->message);
+                return;
+            } else {
+            }
+            return $result;
         }
-        print_r(json_decode($body));
-        return json_decode($body);
     }
 
-    protected function uploadPartsBySession($session_id, $upload_file, $total_parts)
+    protected function uploadPartsBySession($session, $upload_file)
     {
         // print("---------------------------");
         // print($this->upload_session . '/' . $session_id);
@@ -225,14 +242,15 @@ class EasyBoxApi
         // print_r($result);
 
         $commit_data = [];
-        $curl = curl_init($this->upload_session . '/' . $session_id);
+        $part_size = $session->part_size;
+        $curl = curl_init($this->upload_session . '/' . $session->id);
         $openfile = fopen($upload_file, "rb") or die("Couldn't open the file");
-        for ($i = 0; $i < $total_parts; $i++) {
-            fseek($openfile, $i * 8388608);
+        for ($i = 0; $i < $session->total_parts; $i++) {
+            fseek($openfile, $i * $part_size);
 
-            $sp_data = fread($openfile, 8388608);
-            $range_end = min($i * 8388608 + 8388608 - 1, filesize($upload_file) - 1);
-            print(strlen($sp_data) . PHP_EOL);
+            $sp_data = fread($openfile, $part_size);
+            $range_end = min($i * $part_size + $part_size - 1, filesize($upload_file) - 1);
+            //print(strlen($sp_data) . PHP_EOL);
             // cURL 転送用オプションを設定する
             curl_setopt_array($curl, array(
                 //CURLOPT_URL => "https://upload.box.com/api/2.0/files/content",
@@ -244,10 +262,9 @@ class EasyBoxApi
                     "Authorization: Bearer $this->accesstoken",
                     "Content-Type: application/octet-stream",
                     "Digest: sha=" . base64_encode(sha1($sp_data, true)),
-                    sprintf("Content-Range: bytes %d-%d/%d", $i * 8388608, $range_end, filesize($upload_file)),
+                    sprintf("Content-Range: bytes %d-%d/%d", $i * $part_size, $range_end, filesize($upload_file)),
                 ),
             ));
-            print("--------------------xxxx");
             $body = curl_exec($curl);
             array_push($commit_data, json_decode($body)->part);
         }
@@ -255,36 +272,39 @@ class EasyBoxApi
         //fseek($openfile, 8388608);
         // $sp_data = fread($openfile, 8388608);
 
-        $post_data = array(
-            "parts" => $commit_data
-        );
 
-        print(base64_encode(sha1_file($upload_file, true)) . PHP_EOL);
 
-        $curl = curl_init($this->upload_session . '/' . $session_id . '/commit');
-        // cURL 転送用オプションを設定する
-        curl_setopt_array($curl, array(
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => "POST",
-            CURLOPT_POSTFIELDS => json_encode($post_data),
-            CURLOPT_HTTPHEADER => array(
-                "Authorization: Bearer $this->accesstoken",
-                "Content-Type: application/json",
-                "Digest: sha=" . base64_encode(sha1_file($upload_file, true)),
-            ),
-        ));
+        //print(base64_encode(sha1_file($upload_file, true)) . PHP_EOL);
+
+        // $curl = curl_init($this->upload_session . '/' . $session->id . '/commit');
+        // // cURL 転送用オプションを設定する
+        // curl_setopt_array($curl, array(
+        //     CURLOPT_RETURNTRANSFER => true,
+        //     CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        //     CURLOPT_CUSTOMREQUEST => "POST",
+        //     CURLOPT_POSTFIELDS => json_encode($post_data),
+        //     CURLOPT_HTTPHEADER => array(
+        //         "Authorization: Bearer $this->accesstoken",
+        //         "Content-Type: application/json",
+        //         "Digest: sha=" . base64_encode(sha1_file($upload_file, true)),
+        //     ),
+        // ));
         // print("--------------------xxxx");
-        $body = curl_exec($curl);
-        $errno = curl_errno($curl);
-        $error = curl_error($curl);
+        //$body = curl_exec($curl);
+        // $errno = curl_errno($curl);
+        // $error = curl_error($curl);
         curl_close($curl);
 
-        if (CURLE_OK !== $errno) {
-            throw new RuntimeException($error, $errno);
-        }
-        print_r(json_decode($body));
-        return json_decode($body);
+        // if (CURLE_OK !== $errno) {
+        //     throw new RuntimeException($error, $errno);
+        // }
+
+        $commit_body = array(
+            "parts" => $commit_data
+        );
+        // print_r(json_decode($body));
+        // return json_decode($body);
+        return $commit_body;
     }
 
     protected function getPartsList($session_id, $file_name)
@@ -295,15 +315,39 @@ class EasyBoxApi
         print_r($result);
     }
 
-    protected function commitSession()
+    protected function commitSession($session, $upload_file, $commit_body)
     {
+        $curl = curl_init($this->upload_session . '/' . $session->id . '/commit');
+        // cURL 転送用オプションを設定する
+        curl_setopt_array($curl, array(
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => json_encode($commit_body),
+            CURLOPT_HTTPHEADER => array(
+                "Authorization: Bearer $this->accesstoken",
+                "Content-Type: application/json",
+                "Digest: sha=" . base64_encode(sha1_file($upload_file, true)),
+            ),
+        ));
+
+        $body = curl_exec($curl);
+        $errno = curl_errno($curl);
+        $error = curl_error($curl);
+        curl_close($curl);
+
+        if (CURLE_OK !== $errno) {
+            throw new RuntimeException($error, $errno);
+        }
+
+        return json_decode($body)->entries[0]->name;
     }
 }
 
 try {
     $test = new EasyBoxApi("config.json");
     $folderID = $test->getFolderByName("bin");
-    $test->uploadFile($folderID, 'C:\Users\malen\Downloads\OpenAM-13.0.0.war');
+    $test->uploadFile($folderID, 'C:\Users\malen\Downloads\VrKanojoUncensor1.0.7z');
 } catch (Exception $e) {
     print($e);
 }
