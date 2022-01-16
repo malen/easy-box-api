@@ -1,0 +1,72 @@
+{
+    "total_count": 1,
+    "entries": [
+        {
+            "type": "file",
+            "id": "906695638512",
+            "file_version": {
+                "type": "file_version",
+                "id": "976476801312",
+                "sha1": "82df8e17a8f1e8b0435432b134895951d443783d"
+            },
+            "sequence_id": "0",
+            "etag": "0",
+            "sha1": "82df8e17a8f1e8b0435432b134895951d443783d",
+            "name": "OpenAM-13.0.0.war",
+            "description": "",
+            "size": 114064986,
+            "path_collection": {
+                "total_count": 2,
+                "entries": [
+                    {
+                        "type": "folder",
+                        "id": "0",
+                        "sequence_id": null,
+                        "etag": null,
+                        "name": "All Files"
+                    },
+                    {
+                        "type": "folder",
+                        "id": "153516452442",
+                        "sequence_id": "0",
+                        "etag": "0",
+                        "name": "bin"
+                    }
+                ]
+            },
+            "created_at": "2022-01-16T05:28:01-08:00",
+            "modified_at": "2022-01-16T05:28:01-08:00",
+            "trashed_at": null,
+            "purged_at": null,
+            "content_created_at": "2022-01-16T05:28:01-08:00",
+            "content_modified_at": "2022-01-16T05:28:01-08:00",
+            "created_by": {
+                "type": "user",
+                "id": "18214606501",
+                "name": "Boxupload",
+                "login": "AutomationUser_1683003_sDlySWuDmd@boxdevedition.com"
+            },
+            "modified_by": {
+                "type": "user",
+                "id": "18214606501",
+                "name": "Boxupload",
+                "login": "AutomationUser_1683003_sDlySWuDmd@boxdevedition.com"
+            },
+            "owned_by": {
+                "type": "user",
+                "id": "18214606501",
+                "name": "Boxupload",
+                "login": "AutomationUser_1683003_sDlySWuDmd@boxdevedition.com"
+            },
+            "shared_link": null,
+            "parent": {
+                "type": "folder",
+                "id": "153516452442",
+                "sequence_id": "0",
+                "etag": "0",
+                "name": "bin"
+            },
+            "item_status": "active"
+        }
+    ]
+}
