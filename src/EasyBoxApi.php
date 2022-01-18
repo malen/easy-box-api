@@ -1,12 +1,8 @@
-#!/usr/bin/php -q
 <?php
 
-//namespace Malen\BoxApi;
-
-require(dirname(dirname(__FILE__)) . '/vendor/autoload.php');
+namespace Easy\BoxApi;
 
 use Firebase\JWT\JWT;
-use GuzzleHttp\Client;
 
 class EasyBoxApi
 {
@@ -28,7 +24,7 @@ class EasyBoxApi
     {
         $json = file_get_contents($config);
         $this->config = json_decode($json);
-        $this->client = new Client();
+        //$this->client = new Client();
         $this->accesstoken = $this->getAccessToken($this->config);
     }
 
@@ -37,14 +33,15 @@ class EasyBoxApi
      */
     protected function getAccessToken($config)
     {
+        // クレーム
         $claims = [
-            'iss' => $config->boxAppSettings->clientID,
-            'sub' => $config->enterpriseID,
-            'box_sub_type' => 'enterprise',
-            'aud' => $this->access_token_url,
-            'jti' => base64_encode(random_bytes(64)),
-            'exp' => time() + 45,
-            'kid' => $config->boxAppSettings->appAuth->publicKeyID
+            'iss' => $config->boxAppSettings->clientID, // JWTの発行者
+            'sub' => $config->enterpriseID,             // JWTの用途
+            'box_sub_type' => 'enterprise',             // subクレームでリクエストされているトークンの種類に応じて決定
+            'aud' => $this->access_token_url,           // JWTの想定利用者
+            'jti' => base64_encode(random_bytes(64)),   // JWTのユニーク性を担保するID値。同じJWTを使い回すことを抑制することを目的にしている
+            'exp' => time() + 45,                       // JWTが失効する日時
+            'kid' => $config->boxAppSettings->appAuth->publicKeyID  // kid is an optional header claim which holds a key identifier, particularly useful when you have multiple keys to sign the tokens and you need to look up the right one to verify the signature.
         ];
 
         $private_key = $config->boxAppSettings->appAuth->privateKey;
@@ -53,19 +50,45 @@ class EasyBoxApi
 
         $assertion = JWT::encode($claims, $key, 'RS512');
 
-        $params = [
-            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-            'assertion' => $assertion,
-            'client_id' => $config->boxAppSettings->clientID,
-            'client_secret' => $config->boxAppSettings->clientSecret
-        ];
+        // $params = [
+        //     'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        //     'assertion' => $assertion,
+        //     'client_id' => $config->boxAppSettings->clientID,
+        //     'client_secret' => $config->boxAppSettings->clientSecret
+        // ];
 
-        $response = $this->client->request('POST', $this->access_token_url, [
-            'form_params' => $params
-        ]);
+        // $response = $this->client->request('POST', $this->access_token_url, [
+        //     'form_params' => $params
+        // ]);
+        $post_data = array(
+            "grant_type" => "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion" => $assertion,
+            "client_id" => $config->boxAppSettings->clientID,
+            "client_secret" => $config->boxAppSettings->clientSecret
+        );
 
-        $data = $response->getBody()->getContents();
-        return json_decode($data)->access_token;
+        $curl = curl_init($this->access_token_url);
+        // cURL 転送用オプションを設定する
+        curl_setopt_array($curl, array(
+            //CURLOPT_URL => "https://upload.box.com/api/2.0/files/content",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => json_encode($post_data),
+            CURLOPT_HTTPHEADER => array(
+                "Content-Type: application/json",
+            ),
+        ));
+        $body = curl_exec($curl);
+        $errno = curl_errno($curl);
+        $error = curl_error($curl);
+        curl_close($curl);
+
+        if (CURLE_OK !== $errno) {
+            throw new \RuntimeException($error, $errno);
+        }
+
+        return json_decode($body)->access_token;
     }
 
     /**
@@ -89,7 +112,7 @@ class EasyBoxApi
         curl_close($curl);
 
         if (CURLE_OK !== $errno) {
-            throw new RuntimeException($error, $errno);
+            throw new \RuntimeException($error, $errno);
         }
         //print_r(json_decode($body)->entries);
         foreach (json_decode($body)->entries as $key => $v) {
@@ -112,7 +135,7 @@ class EasyBoxApi
             // 拡張子のチェック
             if (pathinfo($upload_file, PATHINFO_EXTENSION) != "zip") {
                 print("Zipファイルのフルパスを指定してください。" . PHP_EOL);
-                //return;
+                return;
             }
             // アップロードファイルのサイズチェック
             // print(basename($upload_file) . PHP_EOL);
@@ -149,7 +172,7 @@ class EasyBoxApi
             CURLOPT_CUSTOMREQUEST => "POST",
             CURLOPT_POSTFIELDS => array(
                 'attributes' => sprintf('{"name": "%s", "parent": {"id": "%s"}}', basename($upload_file), $folder_id),
-                'file' => new CURLFILE(realpath($upload_file))
+                'file' => new \CURLFILE(realpath($upload_file))
             ),
             CURLOPT_HTTPHEADER => array(
                 "Authorization: Bearer $this->accesstoken",
@@ -161,9 +184,17 @@ class EasyBoxApi
         curl_close($curl);
 
         if (CURLE_OK !== $errno) {
-            throw new RuntimeException($error, $errno);
+            throw new \RuntimeException($error, $errno);
+        } else {
+            $result = json_decode($body);
+            if (!empty($result->type) && $result->type == "error") {
+                print($result->message);
+            } else {
+                if ($result->entries[0]->name == basename($upload_file)) {
+                    print(sprintf("ファイル[%s]がアップロードされました。", realpath($upload_file)));
+                }
+            }
         }
-        //print($body);
     }
 
     /**
@@ -194,7 +225,6 @@ class EasyBoxApi
             "file_name" => "$file_name"
         );
 
-        //print_r($post_data);
         $post_data = json_encode($post_data);
 
         // cURL 転送用オプションを設定する
@@ -216,9 +246,8 @@ class EasyBoxApi
         curl_close($curl);
 
         if (CURLE_OK !== $errno) {
-            throw new RuntimeException($error, $errno);
+            throw new \RuntimeException($error, $errno);
         } else {
-            //print_r(json_decode($body));
             $result = json_decode($body);
             if ($result->type == "error") {
                 print($result->message);
@@ -250,7 +279,7 @@ class EasyBoxApi
 
             $sp_data = fread($openfile, $part_size);
             $range_end = min($i * $part_size + $part_size - 1, filesize($upload_file) - 1);
-            //print(strlen($sp_data) . PHP_EOL);
+
             // cURL 転送用オプションを設定する
             curl_setopt_array($curl, array(
                 //CURLOPT_URL => "https://upload.box.com/api/2.0/files/content",
@@ -268,31 +297,7 @@ class EasyBoxApi
             $body = curl_exec($curl);
             array_push($commit_data, json_decode($body)->part);
         }
-        //$filesize = filesize($myfile);
-        //fseek($openfile, 8388608);
-        // $sp_data = fread($openfile, 8388608);
-
-
-
-        //print(base64_encode(sha1_file($upload_file, true)) . PHP_EOL);
-
-        // $curl = curl_init($this->upload_session . '/' . $session->id . '/commit');
-        // // cURL 転送用オプションを設定する
-        // curl_setopt_array($curl, array(
-        //     CURLOPT_RETURNTRANSFER => true,
-        //     CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-        //     CURLOPT_CUSTOMREQUEST => "POST",
-        //     CURLOPT_POSTFIELDS => json_encode($post_data),
-        //     CURLOPT_HTTPHEADER => array(
-        //         "Authorization: Bearer $this->accesstoken",
-        //         "Content-Type: application/json",
-        //         "Digest: sha=" . base64_encode(sha1_file($upload_file, true)),
-        //     ),
-        // ));
-        // print("--------------------xxxx");
-        //$body = curl_exec($curl);
-        // $errno = curl_errno($curl);
-        // $error = curl_error($curl);
+        fclose($openfile);
         curl_close($curl);
 
         // if (CURLE_OK !== $errno) {
@@ -302,17 +307,16 @@ class EasyBoxApi
         $commit_body = array(
             "parts" => $commit_data
         );
-        // print_r(json_decode($body));
-        // return json_decode($body);
+
         return $commit_body;
     }
 
     protected function getPartsList($session_id, $file_name)
     {
-        $header = "Authorization: Bearer $this->accesstoken";
-        $result = shell_exec("curl -X GET $this->upload_session.'/'.$session_id.'/parts' -H $header");
+        // $header = "Authorization: Bearer $this->accesstoken";
+        // $result = shell_exec("curl -X GET $this->upload_session.'/'.$session_id.'/parts' -H $header");
 
-        print_r($result);
+        // print_r($result);
     }
 
     protected function commitSession($session, $upload_file, $commit_body)
@@ -337,18 +341,9 @@ class EasyBoxApi
         curl_close($curl);
 
         if (CURLE_OK !== $errno) {
-            throw new RuntimeException($error, $errno);
+            throw new \RuntimeException($error, $errno);
         }
 
         return json_decode($body)->entries[0]->name;
     }
 }
-
-try {
-    $test = new EasyBoxApi("config.json");
-    $folderID = $test->getFolderByName("bin");
-    $test->uploadFile($folderID, 'C:\Users\malen\Downloads\VrKanojoUncensor1.0.7z');
-} catch (Exception $e) {
-    print($e);
-}
-?>
